@@ -210,13 +210,17 @@ class Coach:
             epDiLoss_audio = 0
         steps = trnLoader.dataset.__len__() // args.batch
 
+        import time
         # --- Fast DataLoader replacement ---
         dataset_tensor = self.handler.diffusionData.data
         dataset_size = dataset_tensor.shape[0]
         perm_indices = torch.randperm(dataset_size)
         num_batches = (dataset_size + args.batch - 1) // args.batch
 
+        log(f'Batch size: {args.batch}, Num batches: {num_batches}')
+        
         for i in range(num_batches):
+            t0 = time.time()
             batch_index = perm_indices[i*args.batch : (i+1)*args.batch]
             batch_item = dataset_tensor[batch_index]
             batch_item, batch_index = batch_item.to(device), batch_index.to(device)
@@ -289,7 +293,8 @@ class Coach:
                 self.denoise_opt_text.step()
                 if args.data == 'tiktok':
                     self.denoise_opt_audio.step()
-                log('Diffusion Step %d/%d' % (i, num_batches), save=False, oneline=True)
+                t1 = time.time()
+                log('Diffusion Step %d/%d (%.2fs)' % (i, num_batches, t1 - t0), save=False, oneline=True)
 
         log('')
         log('Start to re-build UI matrix using Euler Solver')
@@ -311,6 +316,7 @@ class Coach:
 
         # --- Fast DataLoader replacement ---
             for i_batch in range(num_batches):
+                t0 = time.time()
                 batch_index = perm_indices[i_batch*args.batch : (i_batch+1)*args.batch]
                 batch_item = dataset_tensor[batch_index]
                 batch_item, batch_index = batch_item.to(device), batch_index.to(device)
@@ -344,6 +350,8 @@ class Coach:
                     u_list_audio.extend(batch_u)
                     i_list_audio.extend(indices_.flatten().cpu().tolist())
                     edge_list_audio.extend([1.0] * len(batch_u))
+                t1 = time.time()
+                log('Euler Solver Step %d/%d (%.2fs)' % (i_batch, num_batches, t1 - t0), save=False, oneline=True)
 
             # image
             u_list_image = np.array(u_list_image)
