@@ -321,26 +321,22 @@ class Coach:
                         denoised_batch_audio = self.diffusion_model.p_sample(self.denoise_model_audio, batch_item, args.sampling_steps, args.sampling_noise)
 
                 top_item, indices_ = torch.topk(denoised_batch_image, k=args.rebuild_k)
-                for i in range(batch_index.shape[0]):
-                    for j in range(indices_[i].shape[0]):
-                        u_list_image.append(int(batch_index[i].cpu().numpy()))
-                        i_list_image.append(int(indices_[i][j].cpu().numpy()))
-                        edge_list_image.append(1.0)
+                batch_u = batch_index.repeat_interleave(args.rebuild_k).cpu().tolist()
+                
+                u_list_image.extend(batch_u)
+                i_list_image.extend(indices_.flatten().cpu().tolist())
+                edge_list_image.extend([1.0] * len(batch_u))
 
                 top_item, indices_ = torch.topk(denoised_batch_text, k=args.rebuild_k)
-                for i in range(batch_index.shape[0]):
-                    for j in range(indices_[i].shape[0]):
-                        u_list_text.append(int(batch_index[i].cpu().numpy()))
-                        i_list_text.append(int(indices_[i][j].cpu().numpy()))
-                        edge_list_text.append(1.0)
+                u_list_text.extend(batch_u)
+                i_list_text.extend(indices_.flatten().cpu().tolist())
+                edge_list_text.extend([1.0] * len(batch_u))
 
                 if args.data == 'tiktok':
                     top_item, indices_ = torch.topk(denoised_batch_audio, k=args.rebuild_k)
-                    for i in range(batch_index.shape[0]):
-                        for j in range(indices_[i].shape[0]):
-                            u_list_audio.append(int(batch_index[i].cpu().numpy()))
-                            i_list_audio.append(int(indices_[i][j].cpu().numpy()))
-                            edge_list_audio.append(1.0)
+                    u_list_audio.extend(batch_u)
+                    i_list_audio.extend(indices_.flatten().cpu().tolist())
+                    edge_list_audio.extend([1.0] * len(batch_u))
 
             # image
             u_list_image = np.array(u_list_image)
