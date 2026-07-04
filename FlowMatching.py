@@ -32,28 +32,11 @@ class GraphFlowMatching(nn.Module):
 
     def optimal_transport_pairing(self, x_0, alpha_0):
         """
-        [V3] OT-CFM (Optimal Transport CFM):
-        Ghép cặp nhiễu x_0 và dữ liệu alpha_0 bằng Greedy Transport 
-        nhằm làm quỹ đạo dòng chảy thành đường thẳng ngắn nhất.
-        Giảm thiểu over-crossing (quỹ đạo chéo) giúp giải ODE nhanh và mượt hơn.
+        [V4] Đã gỡ bỏ Greedy OT để tránh lỗi Mode Collapse (Many-to-One mapping).
+        Sử dụng Independent CFM mặc định ghép (x_0[i] -> alpha_0[i]) 
+        để đảm bảo sinh đủ đa dạng phân phối dữ liệu (Bijective distribution).
         """
-        with torch.no_grad():
-            # Tính ma trận khoảng cách pairwise cost C (Batch_size, Batch_size)
-            # x_0: (B, I), alpha_0: (B, I)
-            # Sử dụng cdist để tính L2 distance
-            C = torch.cdist(x_0.float(), alpha_0.float()) 
-            
-            # Khởi tạo ma trận assignment
-            batch_size = x_0.size(0)
-            assigned_alpha_0 = torch.zeros_like(alpha_0)
-            
-            # Greedy matching (nhanh hơn Sinkhorn trên Batch nhỏ)
-            _, min_indices = torch.min(C, dim=1)
-            
-            # Sắp xếp lại alpha_0 theo thứ tự tối ưu
-            assigned_alpha_0 = alpha_0[min_indices]
-            
-        return assigned_alpha_0
+        return alpha_0
 
     def training_losses(self, model, alpha_0, itmEmbeds, batch_index, model_feats, item_doubt=None, omega=2.0):
         """
@@ -62,8 +45,11 @@ class GraphFlowMatching(nn.Module):
         batch_size = alpha_0.size(0)
         device = alpha_0.device
 
-        # 1. Sample t ~ U[0, 1]
-        t = torch.rand(batch_size, device=device)
+        # 1. V4: Adaptive Noise Scheduler (Logit-Normal Sampling)
+        # Giúp mô hình tập trung học nhiều hơn ở khoảng giữa của dòng chảy (t gần 0.5)
+        # nơi trường vector phức tạp nhất, thay vì chia đều U[0,1]
+        z = torch.randn(batch_size, device=device) * 1.2
+        t = torch.sigmoid(z)
         
         # 2. Sample x_0 ~ N(0, I)
         x_0 = torch.randn_like(alpha_0)
@@ -82,9 +68,8 @@ class GraphFlowMatching(nn.Module):
             alpha_0 = alpha_0 * (1.0 - s_d_batch)
         # -------------------------------------------------------------
         
-        # --- Descartes V3: OT-CFM ---
-        # Ghép cặp tối ưu để làm thẳng Vector Field
-        alpha_0 = self.optimal_transport_pairing(x_0, alpha_0)
+        # --- Descartes V4: Independent CFM (No mode collapse) ---
+        # alpha_0 = self.optimal_transport_pairing(x_0, alpha_0)
         # ----------------------------
 
         # 3. Compute path and target velocity

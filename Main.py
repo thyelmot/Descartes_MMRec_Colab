@@ -331,20 +331,23 @@ class Coach:
                     if args.data == 'tiktok':
                         denoised_batch_audio = self.diffusion_model.p_sample(self.denoise_model_audio, batch_item, args.sampling_steps, args.sampling_noise)
 
-                top_item, indices_ = torch.topk(denoised_batch_image, k=args.rebuild_k)
-                batch_u = batch_index.repeat_interleave(args.rebuild_k).cpu().tolist()
+                # V4 Optimization: Tăng mật độ đồ thị mô phỏng (Graph Density)
+                rebuild_k_v4 = 20 # Thay vì 1 như mặc định, 20 cung cấp đủ Collaborative Signals
+                
+                top_item, indices_ = torch.topk(denoised_batch_image, k=rebuild_k_v4)
+                batch_u = batch_index.repeat_interleave(rebuild_k_v4).cpu().tolist()
                 
                 u_list_image.extend(batch_u)
                 i_list_image.extend(indices_.flatten().cpu().tolist())
                 edge_list_image.extend([1.0] * len(batch_u))
 
-                top_item, indices_ = torch.topk(denoised_batch_text, k=args.rebuild_k)
+                top_item, indices_ = torch.topk(denoised_batch_text, k=rebuild_k_v4)
                 u_list_text.extend(batch_u)
                 i_list_text.extend(indices_.flatten().cpu().tolist())
                 edge_list_text.extend([1.0] * len(batch_u))
 
                 if args.data == 'tiktok':
-                    top_item, indices_ = torch.topk(denoised_batch_audio, k=args.rebuild_k)
+                    top_item, indices_ = torch.topk(denoised_batch_audio, k=rebuild_k_v4)
                     u_list_audio.extend(batch_u)
                     i_list_audio.extend(indices_.flatten().cpu().tolist())
                     edge_list_audio.extend([1.0] * len(batch_u))
