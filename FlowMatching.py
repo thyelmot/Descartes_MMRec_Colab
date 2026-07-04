@@ -29,13 +29,13 @@ class GraphFlowMatching(nn.Module):
         sigma = self.sigma_min
         return (1 - sigma) * psi_t + (1 - t * (1 - sigma)) * v_t
 
-    def training_losses(self, model, alpha_0, itmEmbeds, batch_index, model_feats, S_doubt=None, omega=2.0):
+    def training_losses(self, model, alpha_0, itmEmbeds, batch_index, model_feats, item_doubt=None, omega=0.5):
         """
         alpha_0: Ground truth interaction matrix (batch_size, num_items)
         model: VelocityModel to predict vector field
         itmEmbeds: Item ID embeddings
         model_feats: Multimodal features
-        S_doubt: Doubt Score matrix (U, I) for Descartes V2
+        item_doubt: Per-item doubt scores (I,) for Descartes V2
         omega: Noise multiplier for V2
         """
         batch_size = alpha_0.size(0)
@@ -47,17 +47,17 @@ class GraphFlowMatching(nn.Module):
         # 2. Sample x_0 ~ N(0, I)
         x_0 = torch.randn_like(alpha_0)
         
-        # --- Descartes V2 ---
-        if S_doubt is not None:
-            # S_doubt for current batch: (batch_size, num_items)
-            s_d_batch = S_doubt[batch_index, :]
+        # --- Descartes V2: Sparse Doubt ---
+        if item_doubt is not None:
+            damping = 0.3
+            doubt_weight = damping * item_doubt.unsqueeze(0)  # (1, I)
             
-            # Uncertainty-Guided Noise (scale x_0)
-            noise_scaler = 1.0 + omega * s_d_batch
+            # Uncertainty-Guided Noise (scale x_0 gently)
+            noise_scaler = 1.0 + omega * item_doubt.unsqueeze(0)
             x_0 = x_0 * noise_scaler
             
-            # Counterfactual Target (discount alpha_0)
-            alpha_0 = alpha_0 * (1.0 - s_d_batch)
+            # Counterfactual Target (soft discount alpha_0)
+            alpha_0 = alpha_0 * (1.0 - doubt_weight)
         # --------------------
 
         

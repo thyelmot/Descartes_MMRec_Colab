@@ -157,24 +157,27 @@ class GaussianDiffusion(nn.Module):
 		
 		return model_mean, model_log_variance
 
-	def training_losses(self, model, x_start, itmEmbeds, batch_index, model_feats, S_doubt=None, omega=2.0):
+	def training_losses(self, model, x_start, itmEmbeds, batch_index, model_feats, item_doubt=None, omega=0.5):
 		batch_size = x_start.size(0)
 
-		# --- Descartes V2 ---
-		if S_doubt is not None:
-			s_d_batch = S_doubt[batch_index, :]
-			x_start_target = x_start * (1.0 - s_d_batch)
+		# --- Descartes V2: Sparse Doubt ---
+		if item_doubt is not None:
+			# item_doubt is (I,) per-item doubt, x_start is (B, I)
+			# Apply soft damping: scale doubt effect gently
+			damping = 0.3
+			doubt_weight = damping * item_doubt.unsqueeze(0)  # (1, I) broadcast to (B, I)
+			x_start_target = x_start * (1.0 - doubt_weight)
 		else:
 			x_start_target = x_start
-			s_d_batch = None
+			doubt_weight = None
 		# --------------------
 
 		ts = torch.randint(0, self.steps, (batch_size,)).long().to(device)
 		noise = torch.randn_like(x_start)
 		if self.noise_scale != 0:
-			if s_d_batch is not None:
-				# Scale noise based on doubt
-				noise_scaler = 1.0 + omega * s_d_batch
+			if doubt_weight is not None:
+				# Scale noise gently based on item doubt
+				noise_scaler = 1.0 + omega * item_doubt.unsqueeze(0)  # (1, I)
 				scaled_noise = noise * noise_scaler
 			else:
 				scaled_noise = noise
@@ -239,22 +242,23 @@ class FlowMatching_Original(nn.Module):
 			
 		return x_t
 
-	def training_losses(self, model, x_start, itmEmbeds, batch_index, model_feats, S_doubt=None, omega=2.0):
+	def training_losses(self, model, x_start, itmEmbeds, batch_index, model_feats, item_doubt=None, omega=0.5):
 		batch_size = x_start.size(0)
 
 		# Sample continuous time t uniformly in [0, 1]
 		ts = torch.rand(batch_size, device=device)
 		noise = torch.randn_like(x_start)
 		
-		# --- Descartes V2 ---
-		if S_doubt is not None:
-			s_d_batch = S_doubt[batch_index, :]
+		# --- Descartes V2: Sparse Doubt ---
+		if item_doubt is not None:
+			damping = 0.3
+			doubt_weight = damping * item_doubt.unsqueeze(0)  # (1, I)
 			# Uncertainty-Guided Noise
-			noise_scaler = 1.0 + omega * s_d_batch
+			noise_scaler = 1.0 + omega * item_doubt.unsqueeze(0)
 			noise = noise * noise_scaler
 			
 			# Counterfactual Target
-			x_start_target = x_start * (1.0 - s_d_batch)
+			x_start_target = x_start * (1.0 - doubt_weight)
 		else:
 			x_start_target = x_start
 		# --------------------
