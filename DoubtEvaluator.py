@@ -8,9 +8,8 @@ class DoubtEvaluator(nn.Module):
     Tính toán Doubt Score để cắt tỉa các tương tác nhiễu, clickbait.
     Tối ưu hóa bộ nhớ cho các Dataset lớn (như TikTok, Baby).
     """
-    def __init__(self, tau_threshold=0.8, alpha=0.3, beta=0.5, gamma=0.2):
+    def __init__(self, alpha=0.3, beta=0.5, gamma=0.2):
         super(DoubtEvaluator, self).__init__()
-        self.tau = tau_threshold
         self.alpha = alpha
         self.beta = beta
         self.gamma = gamma
@@ -54,45 +53,12 @@ class DoubtEvaluator(nn.Module):
     def forward(self, adj_matrix_sp, user_emb, item_visual_emb, item_text_emb):
         """
         adj_matrix_sp: SciPy coo_matrix or PyTorch sparse tensor shape (U, I)
-        Returns: masked adjacency matrix shape (U, I) as torch.sparse.FloatTensor
+        Returns: S_doubt tensor shape (U, I)
         """
         with torch.no_grad():
             S_doubt = self.compute_doubt_score(adj_matrix_sp, user_emb, item_visual_emb, item_text_emb)
             
-            # Tạo mask: Giữ lại những cạnh có S_doubt <= tau
-            mask = (S_doubt <= self.tau).float()
-            
-            # Áp dụng mask lên ma trận tương tác ban đầu
-            # Chuyển đổi adj_matrix sang dense nếu cần, hoặc nhân mask trên các vị trí khác 0
-            if not isinstance(adj_matrix_sp, torch.Tensor):
-                import numpy as np
-                # Extract indices from coo_matrix
-                row = adj_matrix_sp.row
-                col = adj_matrix_sp.col
-                
-                # Check doubt score only at non-zero edges
-                # mask shape is (U, I). We can index it directly
-                edge_mask = mask[row, col]
-                
-                # Keep edges where mask == 1.0
-                keep_idx = edge_mask > 0.5
-                
-                new_row = row[keep_idx.cpu().numpy()]
-                new_col = col[keep_idx.cpu().numpy()]
-                new_data = np.ones_like(new_row, dtype=np.float32)
-                
-                import scipy.sparse as sp
-                new_adj = sp.coo_matrix((new_data, (new_row, new_col)), shape=adj_matrix_sp.shape)
-                return new_adj
-            else:
-                # PyTorch sparse tensor
-                indices = adj_matrix_sp._indices()
-                values = adj_matrix_sp._values()
-                
-                edge_mask = mask[indices[0], indices[1]]
-                keep_idx = edge_mask > 0.5
-                
-                new_indices = indices[:, keep_idx]
-                new_values = values[keep_idx]
-                
-                return torch.sparse_coo_tensor(new_indices, new_values, size=adj_matrix_sp.shape, device=adj_matrix_sp.device)
+            # Clamp value between 0 and 1
+            S_doubt = torch.clamp(S_doubt, 0.0, 1.0)
+            return S_doubt
+

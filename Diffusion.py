@@ -157,19 +157,35 @@ class GaussianDiffusion(nn.Module):
 		
 		return model_mean, model_log_variance
 
-	def training_losses(self, model, x_start, itmEmbeds, batch_index, model_feats):
+	def training_losses(self, model, x_start, itmEmbeds, batch_index, model_feats, S_doubt=None, omega=2.0):
 		batch_size = x_start.size(0)
+
+		# --- Descartes V2 ---
+		if S_doubt is not None:
+			s_d_batch = S_doubt[batch_index, :]
+			x_start_target = x_start * (1.0 - s_d_batch)
+		else:
+			x_start_target = x_start
+			s_d_batch = None
+		# --------------------
 
 		ts = torch.randint(0, self.steps, (batch_size,)).long().to(device)
 		noise = torch.randn_like(x_start)
 		if self.noise_scale != 0:
-			x_t = self.q_sample(x_start, ts, noise)
+			if s_d_batch is not None:
+				# Scale noise based on doubt
+				noise_scaler = 1.0 + omega * s_d_batch
+				scaled_noise = noise * noise_scaler
+			else:
+				scaled_noise = noise
+			x_t = self.q_sample(x_start, ts, scaled_noise)
 		else:
 			x_t = x_start
 
 		model_output = model(x_t, ts)
 
-		mse = self.mean_flat((x_start - model_output) ** 2)
+		# Use x_start_target (counterfactual) instead of original x_start
+		mse = self.mean_flat((x_start_target - model_output) ** 2)
 
 		weight = self.SNR(ts - 1) - self.SNR(ts)
 		weight = torch.where((ts == 0), 1.0, weight)
@@ -223,12 +239,25 @@ class FlowMatching_Original(nn.Module):
 			
 		return x_t
 
-	def training_losses(self, model, x_start, itmEmbeds, batch_index, model_feats):
+	def training_losses(self, model, x_start, itmEmbeds, batch_index, model_feats, S_doubt=None, omega=2.0):
 		batch_size = x_start.size(0)
 
 		# Sample continuous time t uniformly in [0, 1]
 		ts = torch.rand(batch_size, device=device)
 		noise = torch.randn_like(x_start)
+		
+		# --- Descartes V2 ---
+		if S_doubt is not None:
+			s_d_batch = S_doubt[batch_index, :]
+			# Uncertainty-Guided Noise
+			noise_scaler = 1.0 + omega * s_d_batch
+			noise = noise * noise_scaler
+			
+			# Counterfactual Target
+			x_start_target = x_start * (1.0 - s_d_batch)
+		else:
+			x_start_target = x_start
+		# --------------------
 		
 		# Compute x_t along the OT flow path
 		x_t = self.q_sample(x_start, ts, noise)
@@ -236,8 +265,8 @@ class FlowMatching_Original(nn.Module):
 		# Predict vector field (velocity)
 		v_t = model(x_t, ts * self.steps)
 
-		# Target vector field: u_t = x_start - noise
-		u_t = x_start - noise
+		# Target vector field: u_t = x_start_target - noise
+		u_t = x_start_target - noise
 
 		# Flow matching loss (MSE between predicted and target velocity)
 		fm_loss = self.mean_flat((v_t - u_t) ** 2)

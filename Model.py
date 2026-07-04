@@ -56,7 +56,6 @@ class Model(nn.Module):
         
         # --- Descartes-MMRec Modules ---
         self.doubt_evaluator = DoubtEvaluator(
-            tau_threshold=args.tau_threshold,
             alpha=args.alpha_doubt,
             beta=args.beta_doubt,
             gamma=args.gamma_doubt

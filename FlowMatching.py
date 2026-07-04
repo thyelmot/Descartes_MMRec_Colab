@@ -29,12 +29,14 @@ class GraphFlowMatching(nn.Module):
         sigma = self.sigma_min
         return (1 - sigma) * psi_t + (1 - t * (1 - sigma)) * v_t
 
-    def training_losses(self, model, alpha_0, itmEmbeds, batch_index, model_feats):
+    def training_losses(self, model, alpha_0, itmEmbeds, batch_index, model_feats, S_doubt=None, omega=2.0):
         """
         alpha_0: Ground truth interaction matrix (batch_size, num_items)
         model: VelocityModel to predict vector field
         itmEmbeds: Item ID embeddings
         model_feats: Multimodal features
+        S_doubt: Doubt Score matrix (U, I) for Descartes V2
+        omega: Noise multiplier for V2
         """
         batch_size = alpha_0.size(0)
         device = alpha_0.device
@@ -44,6 +46,20 @@ class GraphFlowMatching(nn.Module):
         
         # 2. Sample x_0 ~ N(0, I)
         x_0 = torch.randn_like(alpha_0)
+        
+        # --- Descartes V2 ---
+        if S_doubt is not None:
+            # S_doubt for current batch: (batch_size, num_items)
+            s_d_batch = S_doubt[batch_index, :]
+            
+            # Uncertainty-Guided Noise (scale x_0)
+            noise_scaler = 1.0 + omega * s_d_batch
+            x_0 = x_0 * noise_scaler
+            
+            # Counterfactual Target (discount alpha_0)
+            alpha_0 = alpha_0 * (1.0 - s_d_batch)
+        # --------------------
+
         
         # 3. Compute path and target velocity
         psi_t = self.compute_path(x_0, alpha_0, t)

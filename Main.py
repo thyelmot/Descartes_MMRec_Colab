@@ -69,17 +69,11 @@ class Coach:
                 image_feats = self.model.getImageFeats().detach()
                 text_feats = self.model.getTextFeats().detach()
                 
-                # Gọi Doubt Evaluator
-                core_graph = self.model.doubt_evaluator(
+                # Gọi Doubt Evaluator để lấy Doubt Score (Không làm thưa đồ thị)
+                self.S_doubt = self.model.doubt_evaluator(
                     self.handler.trnMat, 
                     uEmbeds, image_feats, text_feats
                 )
-                
-                # Cập nhật Dữ liệu cho Diffusion Model học trên Core Graph thay vì R thô
-                if isinstance(core_graph, torch.Tensor):
-                    self.handler.diffusionData.data = core_graph.to_dense().cpu().numpy()
-                else:
-                    self.handler.diffusionData.data = core_graph.toarray()
                 # -----------------------------------------------------------------
                 
                 tstFlag = (ep % args.tstEpoch == 0)
@@ -236,10 +230,13 @@ class Coach:
                 if args.data == 'tiktok':
                     self.velocity_opt_audio.zero_grad()
 
-                cfm_loss_image, msi_loss_image = self.flow_matching.training_losses(self.velocity_model_image, batch_item, iEmbeds, batch_index, image_feats)
-                cfm_loss_text, msi_loss_text = self.flow_matching.training_losses(self.velocity_model_text, batch_item, iEmbeds, batch_index, text_feats)
+                cfm_loss_image, msi_loss_image = self.flow_matching.training_losses(
+                    self.velocity_model_image, batch_item, iEmbeds, batch_index, image_feats, S_doubt=getattr(self, 'S_doubt', None), omega=args.omega)
+                cfm_loss_text, msi_loss_text = self.flow_matching.training_losses(
+                    self.velocity_model_text, batch_item, iEmbeds, batch_index, text_feats, S_doubt=getattr(self, 'S_doubt', None), omega=args.omega)
                 if args.data == 'tiktok':
-                    cfm_loss_audio, msi_loss_audio = self.flow_matching.training_losses(self.velocity_model_audio, batch_item, iEmbeds, batch_index, audio_feats)
+                    cfm_loss_audio, msi_loss_audio = self.flow_matching.training_losses(
+                        self.velocity_model_audio, batch_item, iEmbeds, batch_index, audio_feats, S_doubt=getattr(self, 'S_doubt', None), omega=args.omega)
 
                 loss_image = cfm_loss_image.mean() + msi_loss_image.mean() * args.e_loss
                 loss_text = cfm_loss_text.mean() + msi_loss_text.mean() * args.e_loss
@@ -251,10 +248,13 @@ class Coach:
                 if args.data == 'tiktok':
                     self.denoise_opt_audio.zero_grad()
 
-                diff_loss_image, gc_loss_image = self.diffusion_model.training_losses(self.denoise_model_image, batch_item, iEmbeds, batch_index, image_feats)
-                diff_loss_text, gc_loss_text = self.diffusion_model.training_losses(self.denoise_model_text, batch_item, iEmbeds, batch_index, text_feats)
+                diff_loss_image, gc_loss_image = self.diffusion_model.training_losses(
+                    self.denoise_model_image, batch_item, iEmbeds, batch_index, image_feats, S_doubt=getattr(self, 'S_doubt', None), omega=args.omega)
+                diff_loss_text, gc_loss_text = self.diffusion_model.training_losses(
+                    self.denoise_model_text, batch_item, iEmbeds, batch_index, text_feats, S_doubt=getattr(self, 'S_doubt', None), omega=args.omega)
                 if args.data == 'tiktok':
-                    diff_loss_audio, gc_loss_audio = self.diffusion_model.training_losses(self.denoise_model_audio, batch_item, iEmbeds, batch_index, audio_feats)
+                    diff_loss_audio, gc_loss_audio = self.diffusion_model.training_losses(
+                        self.denoise_model_audio, batch_item, iEmbeds, batch_index, audio_feats, S_doubt=getattr(self, 'S_doubt', None), omega=args.omega)
 
                 loss_image = diff_loss_image.mean() + gc_loss_image.mean() * args.e_loss
                 loss_text = diff_loss_text.mean() + gc_loss_text.mean() * args.e_loss
