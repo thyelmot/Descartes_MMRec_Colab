@@ -1,5 +1,6 @@
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 
 class GraphFlowMatching(nn.Module):
     def __init__(self, sigma_min=1e-4):
@@ -29,14 +30,34 @@ class GraphFlowMatching(nn.Module):
         sigma = self.sigma_min
         return (1 - sigma) * psi_t + (1 - t * (1 - sigma)) * v_t
 
-    def training_losses(self, model, alpha_0, itmEmbeds, batch_index, model_feats, item_doubt=None, omega=0.5):
+    def optimal_transport_pairing(self, x_0, alpha_0):
+        """
+        [V3] OT-CFM (Optimal Transport CFM):
+        Ghép cặp nhiễu x_0 và dữ liệu alpha_0 bằng Greedy Transport 
+        nhằm làm quỹ đạo dòng chảy thành đường thẳng ngắn nhất.
+        Giảm thiểu over-crossing (quỹ đạo chéo) giúp giải ODE nhanh và mượt hơn.
+        """
+        with torch.no_grad():
+            # Tính ma trận khoảng cách pairwise cost C (Batch_size, Batch_size)
+            # x_0: (B, I), alpha_0: (B, I)
+            # Sử dụng cdist để tính L2 distance
+            C = torch.cdist(x_0.float(), alpha_0.float()) 
+            
+            # Khởi tạo ma trận assignment
+            batch_size = x_0.size(0)
+            assigned_alpha_0 = torch.zeros_like(alpha_0)
+            
+            # Greedy matching (nhanh hơn Sinkhorn trên Batch nhỏ)
+            _, min_indices = torch.min(C, dim=1)
+            
+            # Sắp xếp lại alpha_0 theo thứ tự tối ưu
+            assigned_alpha_0 = alpha_0[min_indices]
+            
+        return assigned_alpha_0
+
+    def training_losses(self, model, alpha_0, itmEmbeds, batch_index, model_feats, item_doubt=None, omega=2.0):
         """
         alpha_0: Ground truth interaction matrix (batch_size, num_items)
-        model: VelocityModel to predict vector field
-        itmEmbeds: Item ID embeddings
-        model_feats: Multimodal features
-        item_doubt: Per-item doubt scores (I,) for Descartes V2
-        omega: Noise multiplier for V2
         """
         batch_size = alpha_0.size(0)
         device = alpha_0.device
@@ -47,20 +68,25 @@ class GraphFlowMatching(nn.Module):
         # 2. Sample x_0 ~ N(0, I)
         x_0 = torch.randn_like(alpha_0)
         
-        # --- Descartes V2: Sparse Doubt ---
+        # --- Descartes V2/V3: Soft-Doubt & Counterfactual Target ---
         if item_doubt is not None:
-            damping = 0.3
-            doubt_weight = damping * item_doubt.unsqueeze(0)  # (1, I)
+            # item_doubt có shape (num_items)
+            # Expand ra batch_size
+            s_d_batch = item_doubt.unsqueeze(0).expand(batch_size, -1)
             
-            # Uncertainty-Guided Noise (scale x_0 gently)
-            noise_scaler = 1.0 + omega * item_doubt.unsqueeze(0)
+            # Uncertainty-Guided Noise
+            noise_scaler = 1.0 + omega * s_d_batch
             x_0 = x_0 * noise_scaler
             
-            # Counterfactual Target (soft discount alpha_0)
-            alpha_0 = alpha_0 * (1.0 - doubt_weight)
-        # --------------------
-
+            # Counterfactual Target
+            alpha_0 = alpha_0 * (1.0 - s_d_batch)
+        # -------------------------------------------------------------
         
+        # --- Descartes V3: OT-CFM ---
+        # Ghép cặp tối ưu để làm thẳng Vector Field
+        alpha_0 = self.optimal_transport_pairing(x_0, alpha_0)
+        # ----------------------------
+
         # 3. Compute path and target velocity
         psi_t = self.compute_path(x_0, alpha_0, t)
         v_target = self.compute_target_velocity(x_0, alpha_0)
@@ -80,9 +106,10 @@ class GraphFlowMatching(nn.Module):
         
         return cfm_loss, msi_loss
 
-    def euler_solve(self, model, x_start, steps=5):
+    def euler_solve(self, model, x_start, steps=2): # V3: Chỉ cần 2 steps nhờ OT-CFM
         """
         Solve ODE using Euler method from t=0 to t=1
+        V3: Giảm bước giải xuống còn 2 steps (tiết kiệm 60% thời gian)
         """
         device = x_start.device
         batch_size = x_start.size(0)

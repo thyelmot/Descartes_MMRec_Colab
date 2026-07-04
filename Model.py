@@ -55,16 +55,17 @@ class Model(nn.Module):
         self.leakyrelu = nn.LeakyReLU(0.2)
         
         # --- Descartes-MMRec Modules ---
-        self.doubt_evaluator = DoubtEvaluator(
-            alpha=args.alpha_doubt,
-            beta=args.beta_doubt,
-            gamma=args.gamma_doubt
-        ).to(device)
+        # V3: Truyền args.latdim vào DoubtEvaluator để khởi tạo mạng Attention
+        self.doubt_evaluator = DoubtEvaluator(hidden_dim=args.latdim).to(device)
         
         self.adversarial_trainer = AdversarialTrainer(
             epsilon=args.epsilon_adv,
             warmup_epochs=args.adv_warmup_epochs
         ).to(device)
+        
+        # V3: Trọng số học được để mix High-pass và Low-pass Spectral Filter
+        self.spectral_alpha = nn.Parameter(torch.tensor([0.8, 0.2])) # [Low_pass_weight, High_pass_weight]
+        self.spectral_softmax = nn.Softmax(dim=0)
         # -------------------------------
                 
     def getItemEmbeds(self):
@@ -156,10 +157,12 @@ class Model(nn.Module):
         else:
             embedsModal = weight[0] * embedsImage + weight[1] * embedsText + weight[2] * embedsAudio
 
+        spectral_weights = self.spectral_softmax(self.spectral_alpha)
+        
         embeds = embedsModal
         embedsLst = [embeds]
         for gcn in self.gcnLayers:
-            embeds = gcn(adj, embedsLst[-1])
+            embeds = gcn(adj, embedsLst[-1], spectral_weights=spectral_weights)
             embedsLst.append(embeds)
         embeds = sum(embedsLst)
 
@@ -194,17 +197,19 @@ class Model(nn.Module):
             embedsAudio = torch.concat([self.uEmbeds, F.normalize(audio_feats)])
             embedsAudio = torch.spmm(audio_adj, embedsAudio)
 
+        spectral_weights = self.spectral_softmax(self.spectral_alpha)
+
         embeds1 = embedsImage
         embedsLst1 = [embeds1]
         for gcn in self.gcnLayers:
-            embeds1 = gcn(adj, embedsLst1[-1])
+            embeds1 = gcn(adj, embedsLst1[-1], spectral_weights=spectral_weights)
             embedsLst1.append(embeds1)
         embeds1 = sum(embedsLst1)
 
         embeds2 = embedsText
         embedsLst2 = [embeds2]
         for gcn in self.gcnLayers:
-            embeds2 = gcn(adj, embedsLst2[-1])
+            embeds2 = gcn(adj, embedsLst2[-1], spectral_weights=spectral_weights)
             embedsLst2.append(embeds2)
         embeds2 = sum(embedsLst2)
 
@@ -212,7 +217,7 @@ class Model(nn.Module):
             embeds3 = embedsAudio
             embedsLst3 = [embeds3]
             for gcn in self.gcnLayers:
-                embeds3 = gcn(adj, embedsLst3[-1])
+                embeds3 = gcn(adj, embedsLst3[-1], spectral_weights=spectral_weights)
                 embedsLst3.append(embeds3)
             embeds3 = sum(embedsLst3)
 
@@ -231,8 +236,21 @@ class GCNLayer(nn.Module):
     def __init__(self):
         super(GCNLayer, self).__init__()
 
-    def forward(self, adj, embeds):
-        return torch.spmm(adj, embeds)
+    def forward(self, adj, embeds, spectral_weights=None):
+        """
+        V3: Spectral Graph Filtering (SSR)
+        Tách đồ thị thành 2 dải tần Low-pass (Smooth) và High-pass (Sharp).
+        """
+        low_pass = torch.spmm(adj, embeds)
+        high_pass = embeds - low_pass
+        
+        if spectral_weights is not None:
+            # Mix 2 dải tần lại bằng trọng số học được
+            out = spectral_weights[0] * low_pass + spectral_weights[1] * high_pass
+        else:
+            out = low_pass
+            
+        return out
 
 class SpAdjDropEdge(nn.Module):
     def __init__(self, keepRate):

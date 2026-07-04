@@ -63,17 +63,7 @@ class Coach:
         try:
             for ep in range(start_epoch, args.epoch):
                 # --- Descartes-MMRec: Giai đoạn 1 - Lọc Hoài Nghi (Sparse Doubt) ---
-                log(f'Epoch {ep}: Tính Doubt Score (sparse edges only)...')
-                iEmbeds = self.model.getItemEmbeds().detach()
-                uEmbeds = self.model.getUserEmbeds().detach()
-                image_feats = self.model.getImageFeats().detach()
-                text_feats = self.model.getTextFeats().detach()
-                
-                # Gọi Doubt Evaluator — trả về per-item doubt scores
-                _, _, _, self.item_doubt = self.model.doubt_evaluator(
-                    self.handler.trnMat, 
-                    uEmbeds, image_feats, text_feats
-                )
+                log(f'Epoch {ep}: Tính Doubt Score (Đã di chuyển vào vòng lặp batch để mạng Attention học được)...')
                 # -----------------------------------------------------------------
                 
                 tstFlag = (ep % args.tstEpoch == 0)
@@ -176,6 +166,9 @@ class Coach:
             if args.data == 'tiktok':
                 self.denoise_model_audio = Denoise(in_dims, out_dims, args.d_emb_size, norm=args.norm).to(device)
                 self.denoise_opt_audio = torch.optim.Adam(self.denoise_model_audio.parameters(), lr=args.lr, weight_decay=0)
+        
+        # Optimizer cho mạng Attention của DoubtEvaluator
+        self.doubt_opt = torch.optim.Adam(self.model.doubt_evaluator.parameters(), lr=args.lr)
 
     def normalizeAdj(self, mat):
         degree = np.array(mat.sum(axis=-1))
@@ -220,17 +213,19 @@ class Coach:
         
         for i in range(num_batches):
             t0 = time.time()
-            batch_index = perm_indices[i*args.batch : (i+1)*args.batch]
-            batch_item = dataset_tensor[batch_index]
-            batch_item, batch_index = batch_item.to(device), batch_index.to(device)
+            batch_index = perm_indices[i * args.batch:(i + 1) * args.batch]
+            batch_item = dataset_tensor[batch_index].to(device)
 
-            iEmbeds = self.model.getItemEmbeds().detach()
-            uEmbeds = self.model.getUserEmbeds().detach()
+            # [V3 Fix]: Tính Doubt Score BÊN TRONG vòng lặp để mạng Attention nhận được Gradient
+            uEmbeds_det = self.model.getUserEmbeds().detach()
+            iEmbeds_det = self.model.getItemEmbeds().detach()
+            image_feats_det = self.model.getImageFeats().detach()
+            text_feats_det = self.model.getTextFeats().detach()
 
-            image_feats = self.model.getImageFeats().detach()
-            text_feats = self.model.getTextFeats().detach()
-            if args.data == 'tiktok':
-                audio_feats = self.model.getAudioFeats().detach()
+            self.doubt_opt.zero_grad()
+            _, _, _, self.item_doubt = self.model.doubt_evaluator(
+                self.handler.trnMat, uEmbeds_det, image_feats_det, text_feats_det
+            )
 
             if args.model_type == 'flowmatching_optimized':
                 self.velocity_opt_image.zero_grad()
@@ -239,12 +234,12 @@ class Coach:
                     self.velocity_opt_audio.zero_grad()
 
                 cfm_loss_image, msi_loss_image = self.flow_matching.training_losses(
-                    self.velocity_model_image, batch_item, iEmbeds, batch_index, image_feats, item_doubt=getattr(self, 'item_doubt', None), omega=args.omega)
+                    self.velocity_model_image, batch_item, iEmbeds_det, batch_index, image_feats_det, item_doubt=getattr(self, 'item_doubt', None), omega=args.omega)
                 cfm_loss_text, msi_loss_text = self.flow_matching.training_losses(
-                    self.velocity_model_text, batch_item, iEmbeds, batch_index, text_feats, item_doubt=getattr(self, 'item_doubt', None), omega=args.omega)
+                    self.velocity_model_text, batch_item, iEmbeds_det, batch_index, text_feats_det, item_doubt=getattr(self, 'item_doubt', None), omega=args.omega)
                 if args.data == 'tiktok':
                     cfm_loss_audio, msi_loss_audio = self.flow_matching.training_losses(
-                        self.velocity_model_audio, batch_item, iEmbeds, batch_index, audio_feats, item_doubt=getattr(self, 'item_doubt', None), omega=args.omega)
+                        self.velocity_model_audio, batch_item, iEmbeds_det, batch_index, self.model.getAudioFeats().detach(), item_doubt=getattr(self, 'item_doubt', None), omega=args.omega)
 
                 loss_image = cfm_loss_image.mean() + msi_loss_image.mean() * args.e_loss
                 loss_text = cfm_loss_text.mean() + msi_loss_text.mean() * args.e_loss
@@ -257,12 +252,12 @@ class Coach:
                     self.denoise_opt_audio.zero_grad()
 
                 diff_loss_image, gc_loss_image = self.diffusion_model.training_losses(
-                    self.denoise_model_image, batch_item, iEmbeds, batch_index, image_feats, item_doubt=getattr(self, 'item_doubt', None), omega=args.omega)
+                    self.denoise_model_image, batch_item, iEmbeds_det, batch_index, image_feats_det, item_doubt=getattr(self, 'item_doubt', None), omega=args.omega)
                 diff_loss_text, gc_loss_text = self.diffusion_model.training_losses(
-                    self.denoise_model_text, batch_item, iEmbeds, batch_index, text_feats, item_doubt=getattr(self, 'item_doubt', None), omega=args.omega)
+                    self.denoise_model_text, batch_item, iEmbeds_det, batch_index, text_feats_det, item_doubt=getattr(self, 'item_doubt', None), omega=args.omega)
                 if args.data == 'tiktok':
                     diff_loss_audio, gc_loss_audio = self.diffusion_model.training_losses(
-                        self.denoise_model_audio, batch_item, iEmbeds, batch_index, audio_feats, item_doubt=getattr(self, 'item_doubt', None), omega=args.omega)
+                        self.denoise_model_audio, batch_item, iEmbeds_det, batch_index, self.model.getAudioFeats().detach(), item_doubt=getattr(self, 'item_doubt', None), omega=args.omega)
 
                 loss_image = diff_loss_image.mean() + gc_loss_image.mean() * args.e_loss
                 loss_text = diff_loss_text.mean() + gc_loss_text.mean() * args.e_loss
@@ -286,14 +281,17 @@ class Coach:
                 self.velocity_opt_text.step()
                 if args.data == 'tiktok':
                     self.velocity_opt_audio.step()
-                log('FlowMatching Step %d/%d' % (i, num_batches), save=False, oneline=True)
             else:
                 self.denoise_opt_image.step()
                 self.denoise_opt_text.step()
                 if args.data == 'tiktok':
                     self.denoise_opt_audio.step()
-                t1 = time.time()
-                log('Diffusion Step %d/%d (%.2fs)' % (i, num_batches, t1 - t0), save=False, oneline=True)
+            
+            # Update DoubtEvaluator Attention Network
+            self.doubt_opt.step()
+            
+            t1 = time.time()
+            log('Diffusion Step %d/%d (%.2fs)' % (i, num_batches, t1 - t0), save=False, oneline=True)
 
         log('')
         log('Start to re-build UI matrix using Euler Solver')
@@ -322,10 +320,11 @@ class Coach:
 
                 if args.model_type == 'flowmatching_optimized':
                     x_start = torch.randn_like(batch_item)
-                    denoised_batch_image = self.flow_matching.euler_solve(self.velocity_model_image, x_start, steps=args.steps)
-                    denoised_batch_text = self.flow_matching.euler_solve(self.velocity_model_text, x_start, steps=args.steps)
+                    # V3: Nhờ OT-CFM làm thẳng quỹ đạo, ta có thể giảm steps=2 để tăng tốc mạnh mẽ trên Colab
+                    denoised_batch_image = self.flow_matching.euler_solve(self.velocity_model_image, x_start, steps=2)
+                    denoised_batch_text = self.flow_matching.euler_solve(self.velocity_model_text, x_start, steps=2)
                     if args.data == 'tiktok':
-                        denoised_batch_audio = self.flow_matching.euler_solve(self.velocity_model_audio, x_start, steps=args.steps)
+                        denoised_batch_audio = self.flow_matching.euler_solve(self.velocity_model_audio, x_start, steps=2)
                 else:
                     denoised_batch_image = self.diffusion_model.p_sample(self.denoise_model_image, batch_item, args.sampling_steps, args.sampling_noise)
                     denoised_batch_text = self.diffusion_model.p_sample(self.denoise_model_text, batch_item, args.sampling_steps, args.sampling_noise)
