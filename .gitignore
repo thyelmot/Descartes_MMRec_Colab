@@ -1,0 +1,42 @@
+# ===== Data files (quá lớn cho GitHub) =====
+Datasets/baby/image_feat.npy
+Datasets/baby/text_feat.npy
+Datasets/baby/image_feat.npy.zip
+Datasets/sports/image_feat.npy
+Datasets/sports/text_feat.npy
+Datasets/tiktok/image_feat.npy
+Datasets/tiktok/text_feat.npy
+Datasets/tiktok/audio_feat.npy
+
+# Pickle files (interaction matrices) - optional, bỏ comment nếu muốn push
+# Datasets/*/trnMat.pkl
+# Datasets/*/tstMat.pkl
+# Datasets/*/valMat.pkl
+
+# ===== Python cache =====
+__pycache__/
+*.py[cod]
+*$py.class
+*.pyc
+
+# ===== Checkpoints & Results =====
+checkpoint_*.pth
+results_*.json
+benchmark_report*.md
+logs/
+
+# ===== Jupyter =====
+.ipynb_checkpoints/
+
+# ===== OS =====
+.DS_Store
+Thumbs.db
+
+# ===== IDE =====
+.vscode/
+.idea/
+*.swp
+Datasets/
+__pycache__/
+*.pth
+*.json
