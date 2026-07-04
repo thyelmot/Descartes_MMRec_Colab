@@ -294,7 +294,7 @@ class Coach:
                 if args.data == 'tiktok':
                     self.denoise_opt_audio.step()
                 t1 = time.time()
-                log('Diffusion Step %d/%d (%.2fs)' % (i, num_batches, t1 - t0), save=False, oneline=True)
+                log('Diffusion Step %d/%d (%.2fs)' % (i, num_batches, t1 - t0), save=False, oneline=False)
 
         log('')
         log('Start to re-build UI matrix using Euler Solver')
@@ -351,7 +351,7 @@ class Coach:
                     i_list_audio.extend(indices_.flatten().cpu().tolist())
                     edge_list_audio.extend([1.0] * len(batch_u))
                 t1 = time.time()
-                log('Euler Solver Step %d/%d (%.2fs)' % (i_batch, num_batches, t1 - t0), save=False, oneline=True)
+                log('Euler Solver Step %d/%d (%.2fs)' % (i_batch, num_batches, t1 - t0), save=False, oneline=False)
 
             # image
             u_list_image = np.array(u_list_image)
