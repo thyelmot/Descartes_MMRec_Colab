@@ -116,7 +116,7 @@ class Coach:
     def load_checkpoint(self, path):
         """Load checkpoint và trả về epoch bắt đầu."""
         checkpoint = torch.load(path, map_location=device)
-        self.model.load_state_dict(checkpoint['model'])
+        self.model.load_state_dict(checkpoint['model'], strict=False)
         if args.model_type == 'flowmatching_optimized':
             if 'velocity_image' in checkpoint:
                 self.velocity_model_image.load_state_dict(checkpoint['velocity_image'])
