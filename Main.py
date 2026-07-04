@@ -495,10 +495,10 @@ class Coach:
         ret['BPR Loss'] = epRecLoss / steps
         ret['CL loss'] = epClLoss / steps
         ret['Adv loss'] = epAdvLoss / steps
-        ret['CFM image loss'] = epDiLoss_image / (diffusionLoader.dataset.__len__() // args.batch)
-        ret['CFM text loss'] = epDiLoss_text / (diffusionLoader.dataset.__len__() // args.batch)
+        ret['CFM image loss'] = epDiLoss_image / num_batches
+        ret['CFM text loss'] = epDiLoss_text / num_batches
         if args.data == 'tiktok':
-            ret['CFM audio loss'] = epDiLoss_audio / (diffusionLoader.dataset.__len__() // args.batch)
+            ret['CFM audio loss'] = epDiLoss_audio / num_batches
         return ret
 
     def testEpoch(self):
