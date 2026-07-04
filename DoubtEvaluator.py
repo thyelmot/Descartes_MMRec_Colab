@@ -33,7 +33,7 @@ class DoubtEvaluator(nn.Module):
             D_pref = 1.0 - A_ui # (U, I)
             
             # 3. Tính độ hoài nghi về Popularity Bias
-            if adj_matrix.is_sparse:
+            if isinstance(adj_matrix, torch.Tensor) and adj_matrix.is_sparse:
                 # Nếu adj_matrix là sparse tensor của PyTorch
                 item_degrees = torch.sparse.sum(adj_matrix, dim=0).to_dense()[:item_visual_emb.shape[0]]
             else:
