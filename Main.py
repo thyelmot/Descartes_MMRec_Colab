@@ -76,7 +76,10 @@ class Coach:
                 )
                 
                 # Cập nhật Dữ liệu cho Diffusion Model học trên Core Graph thay vì R thô
-                self.handler.diffusionData.data = core_graph.to_dense()
+                if isinstance(core_graph, torch.Tensor):
+                    self.handler.diffusionData.data = core_graph.to_dense().cpu().numpy()
+                else:
+                    self.handler.diffusionData.data = core_graph.toarray()
                 # -----------------------------------------------------------------
                 
                 tstFlag = (ep % args.tstEpoch == 0)
