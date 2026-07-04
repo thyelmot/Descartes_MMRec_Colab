@@ -210,10 +210,15 @@ class Coach:
             epDiLoss_audio = 0
         steps = trnLoader.dataset.__len__() // args.batch
 
-        diffusionLoader = self.handler.diffusionLoader
+        # --- Fast DataLoader replacement ---
+        dataset_tensor = self.handler.diffusionData.data
+        dataset_size = dataset_tensor.shape[0]
+        perm_indices = torch.randperm(dataset_size)
+        num_batches = (dataset_size + args.batch - 1) // args.batch
 
-        for i, batch in enumerate(diffusionLoader):
-            batch_item, batch_index = batch
+        for i in range(num_batches):
+            batch_index = perm_indices[i*args.batch : (i+1)*args.batch]
+            batch_item = dataset_tensor[batch_index]
             batch_item, batch_index = batch_item.to(device), batch_index.to(device)
 
             iEmbeds = self.model.getItemEmbeds().detach()
@@ -278,13 +283,13 @@ class Coach:
                 self.velocity_opt_text.step()
                 if args.data == 'tiktok':
                     self.velocity_opt_audio.step()
-                log('FlowMatching Step %d/%d' % (i, diffusionLoader.dataset.__len__() // args.batch), save=False, oneline=True)
+                log('FlowMatching Step %d/%d' % (i, num_batches), save=False, oneline=True)
             else:
                 self.denoise_opt_image.step()
                 self.denoise_opt_text.step()
                 if args.data == 'tiktok':
                     self.denoise_opt_audio.step()
-                log('Diffusion Step %d/%d' % (i, diffusionLoader.dataset.__len__() // args.batch), save=False, oneline=True)
+                log('Diffusion Step %d/%d' % (i, num_batches), save=False, oneline=True)
 
         log('')
         log('Start to re-build UI matrix using Euler Solver')
@@ -304,8 +309,10 @@ class Coach:
                 i_list_audio = []
                 edge_list_audio = []
 
-            for _, batch in enumerate(diffusionLoader):
-                batch_item, batch_index = batch
+        # --- Fast DataLoader replacement ---
+            for i_batch in range(num_batches):
+                batch_index = perm_indices[i_batch*args.batch : (i_batch+1)*args.batch]
+                batch_item = dataset_tensor[batch_index]
                 batch_item, batch_index = batch_item.to(device), batch_index.to(device)
 
                 if args.model_type == 'flowmatching_optimized':
